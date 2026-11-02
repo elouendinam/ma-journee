@@ -1,0 +1,78 @@
+<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#1b1d21"><title>Ma journée</title><link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="icon-192.png">
+<style>body{margin:0;background:#1b1d21;color:#e6e6e6;font:16px/1.45 system-ui,sans-serif;padding:32px max(16px,env(safe-area-inset-right,0px)) 32px max(16px,env(safe-area-inset-left,0px))}main{max-width:460px;margin:0 auto;display:grid;gap:12px}h1{font-size:24px;margin:0}input{min-height:50px;border:1px solid #464b52;border-radius:12px;background:#24272c;color:inherit;padding:0 12px;font-size:16px;width:100%;box-sizing:border-box}button{min-height:52px;border:0;border-radius:14px;background:#7cc4a0;color:#0c1f15;font-weight:700;font-size:16px}p{margin:0;color:#a0a4ab}label{display:grid;gap:4px;font-weight:600;font-size:14px}.e{color:#e27a72}</style></head><body><main id="m"><p>Ouverture…</p></main>
+<script>
+/* Lanceur public : aucune donnée ici. Tout est chiffré dans ton dépôt privé. Le mot de passe n'est jamais envoyé ni gardé. */
+(function(){
+"use strict";
+var LC="elo-sync",LA="elo-app",LS="elo-app-sha",cfg=null,KEY=null,ready=false,known=null,cb=null;
+function g(k){try{return localStorage.getItem(k)}catch(e){return null}}
+function p(k,v){try{localStorage.setItem(k,v)}catch(e){}}
+try{cfg=JSON.parse(g(LC)||"null")}catch(e){}
+if("serviceWorker" in navigator)navigator.serviceWorker.register("sw.js").catch(function(){});
+
+/* Clé gardée sur l'appareil, impossible à exporter */
+function idb(){return new Promise(function(ok,ko){var r=indexedDB.open("elo-coffre",1);r.onupgradeneeded=function(){r.result.createObjectStore("k")};r.onsuccess=function(){ok(r.result)};r.onerror=function(){ko(r.error)}})}
+async function keyGet(){var d=await idb();return new Promise(function(ok,ko){var q=d.transaction("k").objectStore("k").get("main");q.onsuccess=function(){ok(q.result||null)};q.onerror=function(){ko(q.error)}})}
+async function keyPut(v){var d=await idb();return new Promise(function(ok,ko){var t=d.transaction("k","readwrite");t.objectStore("k").put(v,"main");t.oncomplete=function(){ok()};t.onerror=function(){ko(t.error)}})}
+
+/* Chiffrement : AES-256-CBC puis HMAC-SHA256 */
+var te=new TextEncoder(),td=new TextDecoder();
+function b64e(a){var s="";for(var i=0;i<a.length;i+=8192)s+=String.fromCharCode.apply(null,a.subarray(i,i+8192));return btoa(s)}
+function b64d(t){var s=atob(t.replace(/\s/g,"")),a=new Uint8Array(s.length);for(var i=0;i<s.length;i++)a[i]=s.charCodeAt(i);return a}
+function macData(name,iv,ct){var n=te.encode(name),o=new Uint8Array(n.length+1+iv.length+ct.length);o.set(n,0);o.set(iv,n.length+1);o.set(ct,n.length+1+iv.length);return o}
+async function derive(pass,kj){var s=crypto.subtle,m=await s.importKey("raw",te.encode(pass.normalize("NFKC")),"PBKDF2",false,["deriveBits"]),b=new Uint8Array(await s.deriveBits({name:"PBKDF2",hash:"SHA-256",salt:b64d(kj.salt),iterations:kj.iter},m,512));
+  return {e:await s.importKey("raw",b.slice(0,32),{name:"AES-CBC"},false,["encrypt","decrypt"]),h:await s.importKey("raw",b.slice(32),{name:"HMAC",hash:"SHA-256"},false,["sign","verify"])}}
+async function seal(name,text,K){K=K||KEY;var iv=crypto.getRandomValues(new Uint8Array(16)),ct=new Uint8Array(await crypto.subtle.encrypt({name:"AES-CBC",iv:iv},K.e,te.encode(text))),tag=new Uint8Array(await crypto.subtle.sign("HMAC",K.h,macData(name,iv,ct)));return JSON.stringify({v:1,iv:b64e(iv),ct:b64e(ct),tag:b64e(tag)})}
+async function open_(name,json,K){K=K||KEY;var o=JSON.parse(json),iv=b64d(o.iv),ct=b64d(o.ct);if(!await crypto.subtle.verify("HMAC",K.h,b64d(o.tag),macData(name,iv,ct)))throw {wrong:true};return td.decode(await crypto.subtle.decrypt({name:"AES-CBC",iv:iv},K.e,ct))}
+
+function base(){return (cfg&&cfg.api)||"https://api.github.com"}
+function url(f){return base()+"/repos/"+cfg.repo+"/contents/"+f}
+function hd(x){return {Authorization:"Bearer "+cfg.token,"X-GitHub-Api-Version":"2022-11-28",Accept:x||"application/vnd.github+json"}}
+function bad(){if(!ready||document.getElementById("keyBad"))return;var b=document.createElement("button");b.id="keyBad";b.textContent="Ta clé GitHub ne marche plus. Tes données restent ici. Toucher pour coller une nouvelle clé.";b.style.cssText="position:fixed;left:12px;right:12px;top:calc(12px + env(safe-area-inset-top,0px));z-index:99;min-height:56px;border:0;border-radius:14px;background:#d9a54a;color:#1b1d21;font:700 15px system-ui;padding:8px 12px";b.onclick=function(){var o=Object.assign({},cfg);delete o.token;p(LC,JSON.stringify(o));p("elo-rekey","1");location.reload()};document.body.append(b)}
+/* Lit le fichier tel qu'il est stocké, donc illisible sans la clé */
+async function rawGet(f){var r=await fetch(url(f),{headers:hd(),cache:"no-store"});if(r.status===401)bad();if(r.status===404)return null;if(!r.ok)throw {status:r.status};var j=await r.json();
+  if(j.content)return {sha:j.sha,text:td.decode(b64d(j.content))};var w=await fetch(url(f),{headers:hd("application/vnd.github.raw+json"),cache:"no-store"});if(!w.ok)throw {status:w.status};return {sha:j.sha,text:await w.text()}}
+async function read(f){var r=await rawGet(f);if(!r)return null;return {sha:r.sha,text:await open_(f,r.text)}}
+async function shaOf(f){var r=await fetch(url(f),{headers:hd(),cache:"no-store"});if(r.status===401)bad();if(!r.ok)throw {status:r.status};return (await r.json()).sha}
+
+/* Même interface que dans Claude, donc la page reste identique */
+function deliver(r){known=r.sha;if(cb)cb({exists:true,data:function(){return JSON.parse(r.text)}})}
+async function pull(){var r=await read("state.enc");if(!r){if(cb)cb({exists:false,data:function(){return null}});return}if(r.sha!==known)deliver(r)}
+async function put(body){for(var i=0;i<4;i++){
+    var r=await read("state.enc");
+    if(r&&r.sha!==known){deliver(r);try{body=JSON.stringify(window.__S())}catch(e){}}
+    var q={message:"maj",content:b64e(te.encode(await seal("state.enc",body)))};if(r)q.sha=r.sha;
+    var w=await fetch(url("state.enc"),{method:"PUT",headers:hd(),body:JSON.stringify(q)});
+    if(w.ok){known=(await w.json()).content.sha;return}
+    if(w.status===401)bad();
+    if(w.status!==409&&w.status!==422)throw {status:w.status}}
+  throw {status:409}}
+window.claude={use:async function(n){
+  if(n==="user")return {id:async function(){return "me"}};
+  if(n!=="db")return null;
+  return {doc:function(){return {
+    onSnapshot:function(fn,err){cb=fn;pull().catch(function(e){if(err)err(e)});
+      document.addEventListener("visibilitychange",function(){if(!document.hidden){pull().catch(function(){});update()}});
+      addEventListener("online",function(){pull().catch(function(){});update()});
+      setInterval(function(){pull().catch(function(){})},300000)},
+    set:function(b){return put(JSON.stringify(b))}}}}}};
+
+/* Mise à jour : dès qu'une nouvelle version existe, elle s'installe au prochain retour dans l'appli */
+async function update(){try{var s=await shaOf("app.enc");if(s===g(LS))return;var r=await read("app.enc");if(!r)return;p(LA,r.text);p(LS,r.sha);if(ready){if(document.hidden===false&&Date.now()-(window.__tap||0)>20000)location.reload()}else go()}
+  catch(e){if(!ready&&!g(LA))setup(e&&e.wrong?"Mot de passe incorrect.":e&&(e.status===401||e.status===403||e.status===404)?"Dépôt ou clé refusés. Vérifie les deux.":"Il faut du réseau pour la toute première ouverture.")}}
+function go(){var h=g(LA);if(!h)return false;ready=true;
+  document.open();document.write('<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#1b1d21"><link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="icon-192.png"><style>:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0;padding:0}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>'+h+'<script>window.__S=function(){return S};addEventListener("pointerdown",function(){window.__tap=Date.now()},true)<\/script></body></html>');document.close();return true}
+function setup(msg){var m=document.getElementById("m");m.innerHTML="<h1>Ouvre ton coffre</h1><p>À faire une seule fois par appareil. Ton mot de passe ne quitte jamais cet appareil.</p><p class=\"e\" id=\"er\"></p><label>Dépôt privé<input id=\"r\" autocapitalize=\"off\" autocomplete=\"off\"></label><label>Clé GitHub<input id=\"t\" type=\"password\" placeholder=\"github_pat_…\" autocomplete=\"off\"></label><label id=\"pw\">Mot de passe du coffre<input id=\"s\" type=\"password\" autocomplete=\"off\"></label><button id=\"b\">Ouvrir mon appli</button>";
+  var er=document.getElementById("er");er.textContent=msg||"";document.getElementById("r").value=(cfg&&cfg.repo)||(/\.github\.io$/.test(location.hostname)?location.hostname.split(".")[0]+"/ma-journee-coffre":"");if(cfg&&cfg.token)document.getElementById("t").value=cfg.token;if(KEY)document.getElementById("pw").hidden=true;
+  document.getElementById("b").onclick=async function(){var bt=this,o={repo:document.getElementById("r").value.trim(),token:document.getElementById("t").value.trim()},pw=document.getElementById("s").value;if(cfg&&cfg.api)o.api=cfg.api;if(!o.repo||!o.token||(!KEY&&!pw)){er.textContent="Remplis les champs.";return}
+    bt.disabled=true;er.textContent="Vérification…";cfg=o;
+    try{var K=KEY;if(!K){var kj=await rawGet("key.json");if(!kj)throw {status:404};K=await derive(pw,JSON.parse(kj.text))}
+      var ap=await rawGet("app.enc");if(!ap)throw {status:404};var txt=await open_("app.enc",ap.text,K);
+      await keyPut(K);p(LC,JSON.stringify(o));p(LA,txt);p(LS,ap.sha);location.reload()}
+    catch(e){bt.disabled=false;er.textContent=e&&e.wrong?"Mot de passe incorrect.":e&&(e.status===401||e.status===403||e.status===404)?"Dépôt ou clé refusés. Vérifie les deux.":"Il faut du réseau pour cette étape."}}}
+/* après le chargement complet : la page remplace vraiment le lanceur */
+addEventListener("load",async function(){try{KEY=await keyGet()}catch(e){KEY=null}
+  if(!cfg||!cfg.repo||!cfg.token||!KEY){setup(g("elo-rekey")?"Colle ta nouvelle clé. Tes données sont toujours là.":"");return}
+  if(!go())document.getElementById("m").innerHTML="<p>Première ouverture, téléchargement…</p>";update()});
+})();
+</script></body></html>
