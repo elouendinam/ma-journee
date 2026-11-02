@@ -11,7 +11,7 @@ self.addEventListener("fetch", e => {
     return;
   }
   e.respondWith(caches.match(r).then(h => h || fetch(r).then(x => {
-    if (u.origin === location.origin || /fonts\.(googleapis|gstatic)\.com$/.test(u.hostname)) { const y = x.clone(); caches.open(C).then(c => c.put(r, y)); }
+    if (u.origin === location.origin || /(fonts\.(googleapis|gstatic)\.com|cdn\.jsdelivr\.net)$/.test(u.hostname)) { const y = x.clone(); caches.open(C).then(c => c.put(r, y)); }
     return x;
   })));
 });
