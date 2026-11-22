@@ -1,5 +1,5 @@
 /* Garde l'appli sur le téléphone : elle s'ouvre sans réseau, et se met à jour en silence quand il y en a. */
-const C = "ma-journee-fdca63ab26", FILES = ["./", "index.html", "manifest.webmanifest", "icon-192.png", "icon-512.png"];
+const C = "ma-journee-v62", FILES = ["./", "index.html", "manifest.webmanifest", "icon-192.png", "icon-512.png"];
 self.addEventListener("install", e => e.waitUntil(caches.open(C).then(c => c.addAll(FILES)).then(() => self.skipWaiting())));
 self.addEventListener("activate", e => e.waitUntil(caches.keys().then(k => Promise.all(k.filter(x => x !== C).map(x => caches.delete(x)))).then(() => self.clients.claim())));
 self.addEventListener("fetch", e => {
