@@ -65,8 +65,13 @@ async function adopt(){try{if(!KEY)return false;var r=await rawGet("app-new.html
   var ns=(await w.json()).content.sha;
   await fetch(url("app-new.html"),{method:"DELETE",headers:hd(),body:JSON.stringify({message:"nettoyage",sha:r.sha})});
   p(LA,r.text);p(LS,ns);return true}catch(e){return false}}
+/* Si Claude dépose « claude-export » dans ton dépôt privé, ton téléphone y écrit ta version actuelle de l'appli en clair (app-cur.html), sans tes données, pour que Claude parte de ta dernière version */
+async function exportApp(){try{if(!KEY)return;var m=await rawGet("claude-export");if(!m)return;var a=await read("app.enc");if(!a)return;
+  var q={message:"version actuelle pour Claude",content:b64e(te.encode(a.text))},o=await fetch(url("app-cur.html"),{headers:hd(),cache:"no-store"});if(o.ok)q.sha=(await o.json()).sha;
+  var w=await fetch(url("app-cur.html"),{method:"PUT",headers:hd(),body:JSON.stringify(q)});
+  if(w.ok)await fetch(url("claude-export"),{method:"DELETE",headers:hd(),body:JSON.stringify({message:"nettoyage",sha:m.sha})})}catch(e){}}
 /* Mise à jour : dès qu'une nouvelle version existe, elle s'installe au prochain retour dans l'appli */
-async function update(){if(await adopt()){if(ready){if(document.hidden===false&&Date.now()-(window.__tap||0)>20000)location.reload()}else go();return}
+async function update(){await exportApp();if(await adopt()){if(ready){if(document.hidden===false&&Date.now()-(window.__tap||0)>20000)location.reload()}else go();return}
   try{var s=await shaOf("app.enc");if(s===g(LS))return;var r=await read("app.enc");if(!r)return;p(LA,r.text);p(LS,r.sha);if(ready){if(document.hidden===false&&Date.now()-(window.__tap||0)>20000)location.reload()}else go()}
   catch(e){if(!ready&&!g(LA))setup(e&&e.wrong?"Mot de passe incorrect.":e&&(e.status===401||e.status===403||e.status===404)?"Dépôt ou clé refusés. Vérifie les deux.":"Il faut du réseau pour la toute première ouverture.")}}
 function go(){var h=g(LA);if(!h)return false;ready=true;
