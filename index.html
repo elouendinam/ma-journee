@@ -57,21 +57,29 @@ window.claude={use:async function(n){
       setInterval(function(){pull().catch(function(){})},300000)},
     set:function(b){return put(JSON.stringify(b))}}}}}};
 
-/* Nouvelle version déposée en clair dans ton dépôt privé (app-new.html) : ton téléphone la chiffre avec ta clé, l'enregistre en app.enc, puis efface le fichier en clair */
-async function adopt(){try{if(!KEY)return false;var r=await rawGet("app-new.html");if(!r||!r.text||r.text.length<1000)return false;
-  var c=await fetch(url("app.enc"),{headers:hd(),cache:"no-store"}),sha=c.ok?(await c.json()).sha:null;
-  var q={message:"maj appli",content:b64e(te.encode(await seal("app.enc",r.text)))};if(sha)q.sha=sha;
+/* Échange chiffré avec Claude, sans jamais ton mot de passe :
+   1. ton téléphone envoie ta version actuelle de l'appli (sans tes données) dans ton coffre, chiffrée pour Claude seul (app-claude.json) ;
+   2. Claude renvoie la nouvelle version ici (app-new.json), chiffrée pour ce téléphone seul ;
+   3. ton téléphone la rechiffre avec ta clé habituelle et la range dans app.enc. */
+var CLAUDE_PUB={"kty":"RSA","n":"xLHEmBZ-M2a2a7r-yHMblSuCS57gV5m24Gl2E0vxN6dfTrjmlnXvvxbfrmsCpe3dwCHNgP0rIFsFvFavsrEpPwZEHCtAMahfqtc6kF5bFrUM0wjyN4pACFz2ggle9jPfpmYKi4ZRmaCWG298oWealbgvfEBEHJILaxNOrb01xUFelaR11jU0nNeqGn6527FrgJtdr3u0MWJ_MJlox6WVrZTzDMGMzlZ7Dtr0tFYpKfxCXYmxTEqpgHXe2EWtYbWQDK27UR3SFMbJXnHNXIXrB_cWiBdOc8gKUBPzUu2w-Qn8UenCq_2ghF0iJh_rk8gXCNCjOdfFFgPoIpwPRArZeo6vdEjKaPhjbBe5wjyhMGmcp1QC9IG8O7xQhYHGz01guphRloMBiTVBS7D1A6rk0GtZsVf5EwEoOm3U_SaaM4MwtgEafhPESbguc6zW8xxOcPfzS7DcIe-abmDvtCWSk3sNkiCfczNmWYHR-UGlMl2soYBgrSZs-PDBCAmXbPyz","e":"AQAB","alg":"RSA-OAEP-256","ext":true};
+async function kv(k,v){var d=await idb();return new Promise(function(ok,ko){var t=d.transaction("k",v===undefined?"readonly":"readwrite"),s=t.objectStore("k"),q=v===undefined?s.get(k):s.put(v,k);t.oncomplete=function(){ok(v===undefined?q.result||null:v)};t.onerror=function(){ko(t.error)}})}
+async function phoneKeys(){var kp=await kv("rsa");if(kp)return kp;kp=await crypto.subtle.generateKey({name:"RSA-OAEP",modulusLength:3072,publicExponent:new Uint8Array([1,0,1]),hash:"SHA-256"},false,["encrypt","decrypt"]);await kv("rsa",kp);return kp}
+async function putFile(f,text,msg){var q={message:msg,content:b64e(te.encode(text))},o=await fetch(url(f),{headers:hd(),cache:"no-store"});if(o.ok)q.sha=(await o.json()).sha;var w=await fetch(url(f),{method:"PUT",headers:hd(),body:JSON.stringify(q)});if(!w.ok)throw {status:w.status};return (await w.json()).content.sha}
+async function toClaude(){try{if(!KEY||!g(LA)||!g(LS))return;var s=crypto.subtle,kp=await phoneKeys();
+  if(g("elo-pk")!=="1"){await putFile("phone-key.json",JSON.stringify(await s.exportKey("jwk",kp.publicKey)),"clé publique du téléphone");p("elo-pk","1")}
+  if(g("elo-cl-sha")===g(LS))return;
+  var a=await s.generateKey({name:"AES-GCM",length:256},true,["encrypt"]),iv=crypto.getRandomValues(new Uint8Array(12)),ct=new Uint8Array(await s.encrypt({name:"AES-GCM",iv:iv},a,te.encode(g(LA)))),
+    pub=await s.importKey("jwk",CLAUDE_PUB,{name:"RSA-OAEP",hash:"SHA-256"},false,["encrypt"]),wk=new Uint8Array(await s.encrypt({name:"RSA-OAEP"},pub,await s.exportKey("raw",a)));
+  await putFile("app-claude.json",JSON.stringify({v:1,sha:g(LS),k:b64e(wk),iv:b64e(iv),ct:b64e(ct)}),"version actuelle, chiffrée pour Claude");p("elo-cl-sha",g(LS))}catch(e){}}
+async function fromClaude(){try{if(!KEY)return false;var r=await fetch("app-new.json?t="+Date.now(),{cache:"no-store"});if(!r.ok)return false;var j=await r.json();if(!j||!j.id||j.id===g("elo-new-id"))return false;
+  var s=crypto.subtle,kp=await phoneKeys(),raw=await s.decrypt({name:"RSA-OAEP"},kp.privateKey,b64d(j.k)),a=await s.importKey("raw",raw,{name:"AES-GCM"},false,["decrypt"]),
+    txt=td.decode(await s.decrypt({name:"AES-GCM",iv:b64d(j.iv)},a,b64d(j.ct)));if(txt.length<1000)return false;
+  var c=await fetch(url("app.enc"),{headers:hd(),cache:"no-store"}),q={message:"maj appli",content:b64e(te.encode(await seal("app.enc",txt)))};if(c.ok)q.sha=(await c.json()).sha;
   var w=await fetch(url("app.enc"),{method:"PUT",headers:hd(),body:JSON.stringify(q)});if(!w.ok)return false;
-  var ns=(await w.json()).content.sha;
-  await fetch(url("app-new.html"),{method:"DELETE",headers:hd(),body:JSON.stringify({message:"nettoyage",sha:r.sha})});
-  p(LA,r.text);p(LS,ns);return true}catch(e){return false}}
-/* Si Claude dépose « claude-export » dans ton dépôt privé, ton téléphone y écrit ta version actuelle de l'appli en clair (app-cur.html), sans tes données, pour que Claude parte de ta dernière version */
-async function exportApp(){try{if(!KEY)return;var m=await rawGet("claude-export");if(!m)return;var a=await read("app.enc");if(!a)return;
-  var q={message:"version actuelle pour Claude",content:b64e(te.encode(a.text))},o=await fetch(url("app-cur.html"),{headers:hd(),cache:"no-store"});if(o.ok)q.sha=(await o.json()).sha;
-  var w=await fetch(url("app-cur.html"),{method:"PUT",headers:hd(),body:JSON.stringify(q)});
-  if(w.ok)await fetch(url("claude-export"),{method:"DELETE",headers:hd(),body:JSON.stringify({message:"nettoyage",sha:m.sha})})}catch(e){}}
+  p(LA,txt);p(LS,(await w.json()).content.sha);p("elo-new-id",j.id);p("elo-cl-sha",g(LS));return true}catch(e){return false}}
 /* Mise à jour : dès qu'une nouvelle version existe, elle s'installe au prochain retour dans l'appli */
-async function update(){await exportApp();if(await adopt()){if(ready){if(document.hidden===false&&Date.now()-(window.__tap||0)>20000)location.reload()}else go();return}
+async function update(){if(await fromClaude()){if(ready){if(document.hidden===false&&Date.now()-(window.__tap||0)>20000)location.reload()}else go();return}
+  toClaude();
   try{var s=await shaOf("app.enc");if(s===g(LS))return;var r=await read("app.enc");if(!r)return;p(LA,r.text);p(LS,r.sha);if(ready){if(document.hidden===false&&Date.now()-(window.__tap||0)>20000)location.reload()}else go()}
   catch(e){if(!ready&&!g(LA))setup(e&&e.wrong?"Mot de passe incorrect.":e&&(e.status===401||e.status===403||e.status===404)?"Dépôt ou clé refusés. Vérifie les deux.":"Il faut du réseau pour la toute première ouverture.")}}
 function go(){var h=g(LA);if(!h)return false;ready=true;

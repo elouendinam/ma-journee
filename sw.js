@@ -5,7 +5,7 @@ self.addEventListener("activate", e => e.waitUntil(caches.keys().then(k => Promi
 self.addEventListener("fetch", e => {
   const r = e.request, u = new URL(r.url);
   if (r.method !== "GET") return;
-  if (u.hostname === "api.github.com" || u.pathname.startsWith("/mock/")) return;
+  if (u.hostname === "api.github.com" || u.pathname.startsWith("/mock/") || u.pathname.endsWith("app-new.json")) return;
   if (r.mode === "navigate") {
     e.respondWith(fetch(r).then(x => { const y = x.clone(); caches.open(C).then(c => c.put("index.html", y)); return x; }).catch(() => caches.match("index.html")));
     return;
